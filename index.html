@@ -57,6 +57,9 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+    // ======= CHANGE THIS ONE LINE if your tunnel URL changes =======
+    const TILE_HOST = "https://rwanda-pharmaceutical-pharmaceutical-geneva.trycloudflare.com";
+
     // ======= MAP BOUNDS =======
     const basemapBounds = L.latLngBounds([47.204553, 18.456875],[47.249511, 18.523033]);
     const targetBounds  = L.latLngBounds([47.227966, 18.490003],[47.232620, 18.498216]);
@@ -68,19 +71,19 @@
 
     const map = L.map('map', { minZoom: 15, maxZoom: 20, zoomSnap: 1 });
 
-    // ======= BASEMAP: Csala_Csempek =======
-    const base = L.tileLayer('./Csala_Csempek/{z}/{x}/{y}.png', {
+    // ======= BASEMAP served via tunnel =======
+    const base = L.tileLayer(`${TILE_HOST}/Csala_Csempek/{z}/{x}/{y}.png`, {
       minZoom: 15, maxZoom: 20, minNativeZoom: 15, maxNativeZoom: 20,
       tileSize: 256, noWrap: true, zIndex: 100
     }).addTo(map);
 
-    // ======= HISTORIC LAYERS in Georeferalt_Csempek =======
+    // ======= HISTORIC LAYERS via tunnel =======
     const scenes = [
-      { label: '1965.04.27',    path: './Georeferalt_Csempek/1965.04.27/{z}/{x}/{y}.png' },
-      { label: '1965.04.27_2',  path: './Georeferalt_Csempek/1965.04.27_2/{z}/{x}/{y}.png' },
-      { label: '1979.07.19',    path: './Georeferalt_Csempek/1979.07.19/{z}/{x}/{y}.png' },
-      { label: '1979.07.19_2',  path: './Georeferalt_Csempek/1979.07.19_2/{z}/{x}/{y}.png' },
-      { label: '1979.07.19_3',  path: './Georeferalt_Csempek/1979.07.19_3/{z}/{x}/{y}.png' },
+      { label: '1965.04.27',   path: `${TILE_HOST}/Georeferalt_Csempek/1965.04.27/{z}/{x}/{y}.png` },
+      { label: '1965.04.27_2', path: `${TILE_HOST}/Georeferalt_Csempek/1965.04.27_2/{z}/{x}/{y}.png` },
+      { label: '1979.07.19',   path: `${TILE_HOST}/Georeferalt_Csempek/1979.07.19/{z}/{x}/{y}.png` },
+      { label: '1979.07.19_2', path: `${TILE_HOST}/Georeferalt_Csempek/1979.07.19_2/{z}/{x}/{y}.png` },
+      { label: '1979.07.19_3', path: `${TILE_HOST}/Georeferalt_Csempek/1979.07.19_3/{z}/{x}/{y}.png` },
     ];
 
     const histLayers = scenes.map((s, i) =>
@@ -218,7 +221,7 @@
 
     playBtn.addEventListener('click', () => {
       if (animRunning) stopAutoSlide();
-      else startAutoSlide(8000); // <<<<<< 8 seconds
+      else startAutoSlide(8000); // 8 seconds
     });
 
     window.addEventListener('resize', () => map.invalidateSize());
