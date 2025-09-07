@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Csala — Basemap + Historic (Year Slider)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+
+    .panel {
+      position:absolute; z-index:1000; left:10px; top:10px;
+      background:#fff; padding:10px 12px; border-radius:10px;
+      box-shadow:0 2px 8px rgba(0,0,0,.25);
+      font:14px system-ui, sans-serif; min-width:280px;
+      pointer-events:auto; transition: all 0.2s ease;
+    }
+    .row { margin:6px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .row b { white-space:nowrap; }
+    input[type="range"] { width:270px }
+    .panel input[type="range"] { touch-action:none; }
+    .leaflet-pane .leaflet-tile { transition: opacity 180ms linear; }
+
+    .btn {
+      display:inline-block; padding:6px 10px; border-radius:8px;
+      border:1px solid #ddd; background:#f6f6f6; cursor:pointer;
+      font-weight:600; user-select:none;
+    }
+    .btn:active { transform: translateY(1px); }
+
+    @media (max-width: 768px){
+      .panel{ min-width:auto; max-width:calc(100vw - 16px); padding:4px 6px; font-size:11px; border-radius:8px; }
+      input[type="range"]{ width:130px; }
+      .row{ margin:2px 0; gap:6px; }
+      .btn{ padding:3px 5px; font-size:11px; }
+      b, .badge { font-size:11px; }
+    }
+    @media (max-width: 360px){
+      input[type="range"]{ width:110px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="panel">
+    <div class="row"><b>Year:</b> <span id="yearLabel" class="badge">1965.04.27</span></div>
+    <div class="row"><input id="yearSlider" type="range" min="0" max="4" step="0.01" value="0"></div>
+
+    <div class="row"><b>Opacity:</b> <span id="opVal" class="badge">100%</span></div>
+    <div class="row"><input id="opSlider" type="range" min="0" max="100" step="1" value="100"></div>
+
+    <div class="row">
+      <button id="resetBtn" class="btn" title="Press R">Reset View</button>
+      <button id="playBtn" class="btn" title="Auto play year">Auto Year ▶︎</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // ======= MAP BOUNDS =======
+    const basemapBounds = L.latLngBounds([47.204553, 18.456875],[47.249511, 18.523033]);
+    const targetBounds  = L.latLngBounds([47.227966, 18.490003],[47.232620, 18.498216]);
+
+    // Fly-in tightness and nudge (right & down)
+    const TIGHT_BOUNDS = targetBounds.pad(-0.25);
+    const SHIFT_X_FRAC = 0.22;
+    const SHIFT_Y_FRAC = 0.22;
+
+    const map = L.map('map', { minZoom: 15, maxZoom: 20, zoomSnap: 1 });
+
+    // ======= BASEMAP: Csala_Csempek =======
+    const base = L.tileLayer('./Csala_Csempek/{z}/{x}/{y}.png', {
+      minZoom: 15, maxZoom: 20, minNativeZoom: 15, maxNativeZoom: 20,
+      tileSize: 256, noWrap: true, zIndex: 100
+    }).addTo(map);
+
+    // ======= HISTORIC LAYERS in Georeferalt_Csempek =======
+    const scenes = [
+      { label: '1965.04.27',    path: './Georeferalt_Csempek/1965.04.27/{z}/{x}/{y}.png' },
+      { label: '1965.04.27_2',  path: './Georeferalt_Csempek/1965.04.27_2/{z}/{x}/{y}.png' },
+      { label: '1979.07.19',    path: './Georeferalt_Csempek/1979.07.19/{z}/{x}/{y}.png' },
+      { label: '1979.07.19_2',  path: './Georeferalt_Csempek/1979.07.19_2/{z}/{x}/{y}.png' },
+      { label: '1979.07.19_3',  path: './Georeferalt_Csempek/1979.07.19_3/{z}/{x}/{y}.png' },
+    ];
+
+    const histLayers = scenes.map((s, i) =>
+      L.tileLayer(s.path, {
+        minZoom: 15, maxZoom: 20, minNativeZoom: 15, maxNativeZoom: 20,
+        tms: false, tileSize: 256, noWrap: true,
+        opacity: i === 0 ? 1.0 : 0.0, zIndex: 600 + i
+      }).addTo(map)
+    );
+
+    const yearSlider = document.getElementById('yearSlider');
+    const yearLabel  = document.getElementById('yearLabel');
+    const opSlider   = document.getElementById('opSlider');
+    const opVal      = document.getElementById('opVal');
+    const resetBtn   = document.getElementById('resetBtn');
+    const playBtn    = document.getElementById('playBtn');
+
+    // Initial map view & bounds
+    map.fitBounds(basemapBounds);
+    map.setMaxBounds(basemapBounds.pad(0.02));
+    map.options.maxBoundsViscosity = 1.0;
+
+    function shiftedTightCenter() {
+      const c = TIGHT_BOUNDS.getCenter();
+      const widthDeg  = TIGHT_BOUNDS.getEast()  - TIGHT_BOUNDS.getWest();
+      const heightDeg = TIGHT_BOUNDS.getNorth() - TIGHT_BOUNDS.getSouth();
+      return L.latLng(c.lat - heightDeg * SHIFT_Y_FRAC, c.lng + widthDeg * SHIFT_X_FRAC);
+    }
+    const FLY_TARGET = { center: shiftedTightCenter(), zoom: null };
+
+    (function flyInOnce(){
+      const startBounds = targetBounds.pad(0.4);
+      map.fitBounds(startBounds, { animate:false });
+      FLY_TARGET.zoom = map.getBoundsZoom(TIGHT_BOUNDS, true);
+      setTimeout(() => {
+        map.flyTo(FLY_TARGET.center, FLY_TARGET.zoom, { duration: 1.4, easeLinearity: 0.25 });
+      }, 200);
+    })();
+
+    // Panel event isolation
+    const panelEl = document.querySelector('.panel');
+    L.DomEvent.disableClickPropagation(panelEl);
+    L.DomEvent.disableScrollPropagation(panelEl);
+    ['pointerdown','touchstart','mousedown','wheel','click'].forEach(evt => {
+      [yearSlider, opSlider, resetBtn, playBtn].forEach(el => {
+        el.addEventListener(evt, e => e.stopPropagation(), { passive:false });
+      });
+    });
+
+    // ======= Blend between adjacent scenes =======
+    let masterOpacity = (+opSlider.value) / 100;
+
+    function setTimelineValue(v){
+      const N = scenes.length;
+      const idx  = Math.max(0, Math.min(N-1, v));
+      const i0   = Math.floor(idx);
+      const frac = idx - i0;
+      for (let i=0;i<N;i++){
+        let op = 0;
+        if (i === i0)         op = (1-frac) * masterOpacity;
+        else if (i === i0+1)  op = frac * masterOpacity;
+        histLayers[i].setOpacity(op);
+      }
+      const labelIdx = (frac < 0.5) ? i0 : Math.min(i0+1, N-1);
+      yearLabel.textContent = scenes[labelIdx].label;
+    }
+
+    function applyOpacityOnly(){
+      const v = parseFloat(yearSlider.value);
+      setTimelineValue(v);
+      opVal.textContent = Math.round(masterOpacity * 100) + '%';
+    }
+
+    opSlider.addEventListener('input', () => {
+      masterOpacity = (+opSlider.value) / 100;
+      applyOpacityOnly();
+      stopAutoSlide();
+    });
+
+    yearSlider.addEventListener('input', () => {
+      const v = parseFloat(yearSlider.value);
+      if (!setTimelineValue._raf){
+        setTimelineValue._raf = requestAnimationFrame(() => {
+          setTimelineValue(v);
+          setTimelineValue._raf = null;
+        });
+      }
+      stopAutoSlide();
+    });
+
+    // Reset to exact fly-in center+zoom
+    function resetInstant() {
+      map.setView(FLY_TARGET.center, FLY_TARGET.zoom, { animate: false });
+    }
+    resetBtn.addEventListener('click', resetInstant);
+    window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'r') resetInstant(); });
+
+    // ======= Auto Year Slide (8 seconds total) =======
+    let animRaf = null;
+    let animRunning = false;
+    function easeInOutCubic(t){ return t<0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; }
+
+    function startAutoSlide(durationMs = 8000){
+      stopAutoSlide();
+      animRunning = true;
+      playBtn.textContent = 'Stop ⏸';
+      const start = performance.now();
+      const startVal = 0;
+      const endVal   = scenes.length - 1;
+
+      yearSlider.value = startVal.toString();
+      setTimelineValue(startVal);
+
+      function step(now){
+        const t = Math.min(1, (now - start) / durationMs);
+        const v = startVal + (endVal - startVal) * easeInOutCubic(t);
+        yearSlider.value = v.toFixed(3);
+        setTimelineValue(v);
+        if (t < 1 && animRunning){
+          animRaf = requestAnimationFrame(step);
+        } else {
+          stopAutoSlide(false);
+          playBtn.textContent = 'Replay ▶︎';
+        }
+      }
+      animRaf = requestAnimationFrame(step);
+    }
+
+    function stopAutoSlide(resetLabel = true){
+      if (animRaf) cancelAnimationFrame(animRaf);
+      animRaf = null;
+      if (animRunning && resetLabel) playBtn.textContent = 'Auto Year ▶︎';
+      animRunning = false;
+    }
+
+    playBtn.addEventListener('click', () => {
+      if (animRunning) stopAutoSlide();
+      else startAutoSlide(8000); // <<<<<< 8 seconds
+    });
+
+    window.addEventListener('resize', () => map.invalidateSize());
+    window.addEventListener('orientationchange', () => map.invalidateSize());
+
+    // Initial state
+    setTimelineValue(0);
+    opVal.textContent = Math.round(masterOpacity * 100) + '%';
+  </script>
+</body>
+</html>
